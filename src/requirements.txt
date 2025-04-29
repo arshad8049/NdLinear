@@ -1,0 +1,7 @@
+torch
+ndlinear
+numpy
+pandas
+scipy
+matplotlib
+openpyxl
