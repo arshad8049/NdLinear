@@ -34,28 +34,32 @@ class CFRPDataset(Dataset):
             if not os.path.isdir(coupon_dir):
                 continue
 
-            # Find the Excel log file (e.g. L1S11.xlsx)
-            excel_files = [
+            # Find any log file (.xlsx, .xls, or .csv)
+            log_files = [
                 f for f in os.listdir(coupon_dir)
-                if f.lower().endswith(".xlsx") and not f.startswith("._")
+                if f.lower().endswith((".xlsx", ".xls", ".csv"))
+                   and not f.startswith("._")
             ]
-            if not excel_files:
+            if not log_files:
                 continue
-            log_path = os.path.join(coupon_dir, excel_files[0])
-            try:
-                log_df = pd.read_excel(log_path, engine="openpyxl")
-            except (zipfile.BadZipFile, ValueError):
-                # Fallback to xlrd for older Excel formats
-                log_df = pd.read_excel(log_path, engine="xlrd")
+            log_path = os.path.join(coupon_dir, log_files[0])
+
+            # Read into DataFrame
+            if log_path.lower().endswith(".csv"):
+                log_df = pd.read_csv(log_path)
+            else:
+                try:
+                    log_df = pd.read_excel(log_path, engine="openpyxl")
+                except (zipfile.BadZipFile, ValueError):
+                    log_df = pd.read_excel(log_path, engine="xlrd")
             pzt_folder = os.path.join(coupon_dir, "PZT-data")
             if not os.path.isdir(pzt_folder):
                 continue
 
             # For each cycle, load all .mat signals and store with label
             for _, row in log_df.iterrows():
-                cycle_val = row.get("cycle", None)
-                if cycle_val is None:
-                    continue
+                # Extract cycle from row, try both 'cycle' and 'cycles'
+                cycle_val = row.get("cycle") if "cycle" in row else row.get("cycles", None)
 
                 for mat_file in os.listdir(pzt_folder):
                     if not mat_file.endswith(".mat"):
@@ -66,6 +70,12 @@ class CFRPDataset(Dataset):
                     if 'coupon' not in mat_data:
                         continue
                     c = mat_data['coupon']
+                    # If no label from CSV/Excel, fallback to coupon.cycles
+                    if cycle_val is None and hasattr(c, "cycles"):
+                        try:
+                            cycle_val = int(c.cycles) if np.isscalar(c.cycles) else int(c.cycles[0])
+                        except Exception:
+                            cycle_val = 0
                     # Access path_data entries
                     pd_array = c.path_data
                     # Collect all actuator signals across trajectories
@@ -78,7 +88,6 @@ class CFRPDataset(Dataset):
                                 signals.append(sa.flatten())
                     if not signals:
                         continue
-                    import numpy as np
                     signal = np.concatenate(signals)
                     # Trim or pad below __getitem__ will handle window_size
                     self.samples.append({
